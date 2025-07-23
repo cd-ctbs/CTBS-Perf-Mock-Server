@@ -17,7 +17,7 @@ var globalFrom *tview.Form
 
 const FireButtonName = "Fire!"
 const CeaseButtonName = "Cease"
-const UseTestFun = true
+const UseTestFun = false
 
 type StatisticsData struct {
 	RevMsg121Count uint64
@@ -37,6 +37,10 @@ func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *Stati
 	err = client.CreateQueue(client.SedQueue)
 	if err != nil {
 		AppLogger.Printf("Worker %d create sed queue error: %s\n", id, err)
+	}
+	err = client.CreateQueue(client.RevQueue)
+	if err != nil {
+		AppLogger.Printf("Worker %d create rev queue error: %s\n", id, err)
 	}
 	defer client.Logout()
 	go client.HeartBeat(ctx)
@@ -167,9 +171,9 @@ func displayStatistics(ctx context.Context, data *StatisticsData, list *tview.Te
 				list.Clear()
 				fmt.Fprintf(list, "Rev ctbs.121 [%d]\n", data.RevMsg121Count)
 				fmt.Fprintf(list, "Sed ctbs.900 [%d]\n", data.SedMsg900Count)
-				fmt.Fprintf(list, "Rev ctbs.900 [%d]\n", data.RevMsg990Count)
+				fmt.Fprintf(list, "Rev ctbs.900 [%d]\n", data.RevMsg900Count)
 				fmt.Fprintf(list, "Sed ctbs.990 [%d]\n", data.SedMsg990Count)
-				fmt.Fprintf(list, "Rev ctbs.990 [%d]\n", data.RevMsg900Count)
+				fmt.Fprintf(list, "Rev ctbs.990 [%d]\n", data.RevMsg990Count)
 
 				fmt.Fprintf(list, "\nCurrent Time is %s\n", time.Now().Format("2006-01-02T15:04:05"))
 				time.Sleep(500 * time.Microsecond)
