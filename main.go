@@ -60,12 +60,19 @@ func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *Stati
 			atomic.AddUint64(&staticsData.RevMsg990Count, 1)
 		} else {
 			// reply 990 firstly
-			sendMsg990(revMsgHeader, client)
+			sendMsg990(revMsgHeader, revMsgBody, client)
 			atomic.AddUint64(&staticsData.SedMsg990Count, 1)
 
 			if revMsgHeader.MsgType == "ctbs.900.001.01" {
 				atomic.AddUint64(&staticsData.RevMsg900Count, 1)
-			} else {
+			}
+			if revMsgHeader.MsgType == "ctbs.121.001.01" ||
+				revMsgHeader.MsgType == "ctbs.127.001.01" ||
+				revMsgHeader.MsgType == "ctbs.128.001.01" ||
+				revMsgHeader.MsgType == "ctbs.131.001.01" ||
+				revMsgHeader.MsgType == "ctbs.311.001.01" ||
+				revMsgHeader.MsgType == "ctbs.709.001.01" ||
+				revMsgHeader.MsgType == "ctbs.710.001.01" {
 				// Treat all msg as ctbs.121
 				atomic.AddUint64(&staticsData.RevMsg121Count, 1)
 
@@ -102,7 +109,7 @@ func parseMsgBody(msgStr string) (*BaseMsg, error) {
 
 }
 
-func sendMsg990(revMsgHeader *MsgHeader, client *CFMQClient) {
+func sendMsg990(revMsgHeader *MsgHeader, revMsgBody *BaseMsg, client *CFMQClient) {
 	now := time.Now()
 	msgId := buildMsgId()
 	msg990header := MsgHeader{
@@ -122,7 +129,7 @@ func sendMsg990(revMsgHeader *MsgHeader, client *CFMQClient) {
 		RtnCd:      "CT010000",
 	}
 
-	client.SendMsg(msg990header.BuildHeader() + msg990.Build990Msg())
+	client.SendMsg(msg990header.BuildHeader()+msg990.Build990Msg(), revMsgBody.InstgPty)
 }
 
 func sendMsg900(revMsgHeader *MsgHeader, revMsgBody *BaseMsg, client *CFMQClient) {
@@ -146,14 +153,16 @@ func sendMsg900(revMsgHeader *MsgHeader, revMsgBody *BaseMsg, client *CFMQClient
 		OrgnlMT:       revMsgBody.MsgType,
 		PrcSts:        "PR00",
 	}
-	client.SendMsg(header.BuildHeader() + res.Build900Msg())
+	client.SendMsg(header.BuildHeader()+res.Build900Msg(), revMsgBody.InstgPty)
 }
 
 func buildMsgId() string {
-	msgId := time.Now().Format("20060102150405")
-	randId := strconv.Itoa(rand.Int() % 10000)
+	//msgId := time.Now().Format("20060102150405")
+	timestamp := time.Now().UnixMilli()
+	msgId := strconv.FormatInt(timestamp, 10)
+	randId := strconv.Itoa(rand.Int() % 100000)
 
-	for range 4 - len(randId) {
+	for range 5 - len(randId) {
 		msgId += "0"
 	}
 	msgId += randId
@@ -243,7 +252,7 @@ func main() {
 				testClient.SedQueue = setting.RevQueue
 				testClient.CreateQueue(testClient.SedQueue)
 			}
-			testClient.SendMsg(TestMsg)
+			testClient.SendMsg(TestMsg, "090009000004")
 		})
 	}
 

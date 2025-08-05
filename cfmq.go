@@ -72,12 +72,13 @@ func (c *CFMQClient) CreateQueue(queueName string) error {
 	return nil
 }
 
-func (c *CFMQClient) SendMsg(msg string) error {
+func (c *CFMQClient) SendMsg(msg string, bookOrgCode string) error {
 	AppLogger.Printf("[CFMQ] sending message: %s", msg)
 	headers := make(map[string]string)
 	headers[TOKEN] = c.Token
 	headers[DESTINATION] = c.SedQueue
 	headers["Content-Type"] = "text/plain"
+	headers["CFMQ-Msg-Property-bookorgcode"] = bookOrgCode
 	res, err := doHttpRequestWithBody(c.ServerUrl+"/queue/send", headers, msg)
 	if err != nil {
 		AppLogger.Printf("[CFMQ] Error sending message: %s", err)
