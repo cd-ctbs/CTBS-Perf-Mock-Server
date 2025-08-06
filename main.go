@@ -5,12 +5,14 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"github.com/rivo/tview"
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/rivo/tview"
 )
 
 var globalFrom *tview.Form
@@ -27,7 +29,9 @@ type StatisticsData struct {
 	SedMsg990Count uint64
 }
 
-func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *StatisticsData) {
+func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *StatisticsData, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	client, err := NewCFMQClient(setting.Server, setting.Username, setting.Password)
 	if err != nil {
 		AppLogger.Printf("Worker %d create CFMQ clinet error: %s\n", id, err)
@@ -197,8 +201,8 @@ func main() {
 	setting.Load()
 	setting.IsRunning = false
 
-	ctx, cancel := context.WithCancel(context.Background())
 	statisticdata := &StatisticsData{}
+	var wg sync.WaitGroup
 	var testClient *CFMQClient
 
 	app := tview.NewApplication()
@@ -220,17 +224,20 @@ func main() {
 			if globalFrom == nil {
 				return
 			}
+			ctx, cancel := context.WithCancel(context.Background())
 			if setting.IsRunning {
 				button := globalFrom.GetButton(globalFrom.GetButtonIndex(CeaseButtonName))
 				button.SetLabel(FireButtonName)
 				cancel()
+				wg.Wait()
 				setting.IsRunning = false
 			} else {
 				button := globalFrom.GetButton(globalFrom.GetButtonIndex(FireButtonName))
 				button.SetLabel(CeaseButtonName)
 				atoi, _ := strconv.Atoi(setting.ThreadCount)
 				for i := 0; i < atoi; i++ {
-					go handleMsg(ctx, i, setting, statisticdata)
+					wg.Add(1)
+					go handleMsg(ctx, i, setting, statisticdata, &wg)
 				}
 				go displayStatistics(ctx, statisticdata, statisticsList, app)
 				setting.IsRunning = true
@@ -241,6 +248,7 @@ func main() {
 			if testClient != nil {
 				testClient.Logout()
 			}
+			wg.Wait()
 			app.Stop()
 		})
 	form.SetBorder(true).SetTitle("Settings").SetTitleAlign(tview.AlignCenter)
