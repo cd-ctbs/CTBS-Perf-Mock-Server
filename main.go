@@ -5,14 +5,12 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/rivo/tview"
 	"math/rand"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/rivo/tview"
 )
 
 var globalFrom *tview.Form
@@ -29,14 +27,12 @@ type StatisticsData struct {
 	SedMsg990Count uint64
 }
 
-func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *StatisticsData, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *StatisticsData, revQueue string) {
 	client, err := NewCFMQClient(setting.Server, setting.Username, setting.Password)
 	if err != nil {
 		AppLogger.Printf("Worker %d create CFMQ clinet error: %s\n", id, err)
 	}
-	client.RevQueue = setting.RevQueue
+	client.RevQueue = revQueue
 	client.SedQueue = setting.SedQueue
 	err = client.CreateQueue(client.SedQueue)
 	if err != nil {
@@ -79,7 +75,12 @@ func handleMsg(ctx context.Context, id int, setting *Setting, staticsData *Stati
 				revMsgHeader.MsgType == "ctbs.710.001.01" {
 				// Treat all msg as ctbs.121
 				atomic.AddUint64(&staticsData.RevMsg121Count, 1)
-
+				// 2025-08-21 因为挡板发报文太快，可能受理121还没落库，这里先sleep 100ms再发
+				sleepTime, err := strconv.Atoi(setting.SleepTime)
+				if err != nil {
+					sleepTime = 0 // 默认值
+				}
+				time.Sleep(time.Duration(sleepTime) * time.Millisecond)
 				sendMsg900(revMsgHeader, revMsgBody, client)
 				atomic.AddUint64(&staticsData.SedMsg900Count, 1)
 			}
@@ -115,7 +116,7 @@ func parseMsgBody(msgStr string) (*BaseMsg, error) {
 
 func sendMsg990(revMsgHeader *MsgHeader, revMsgBody *BaseMsg, client *CFMQClient) {
 	now := time.Now()
-	msgId := buildMsgId()
+	msgId := GenerateUniqueId()
 	msg990header := MsgHeader{
 		OrigSender:   revMsgHeader.OrigReceiver,
 		OrigReceiver: revMsgHeader.OrigSender,
@@ -138,7 +139,7 @@ func sendMsg990(revMsgHeader *MsgHeader, revMsgBody *BaseMsg, client *CFMQClient
 
 func sendMsg900(revMsgHeader *MsgHeader, revMsgBody *BaseMsg, client *CFMQClient) {
 	now := time.Now()
-	msgId := buildMsgId()
+	msgId := GenerateUniqueId()
 	header := &MsgHeader{
 		OrigSender:   revMsgHeader.OrigReceiver,
 		OrigReceiver: revMsgHeader.OrigSender,
@@ -201,8 +202,13 @@ func main() {
 	setting.Load()
 	setting.IsRunning = false
 
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	// 初始化
+	ctx, cancel = context.WithCancel(context.Background())
 	statisticdata := &StatisticsData{}
-	var wg sync.WaitGroup
 	var testClient *CFMQClient
 
 	app := tview.NewApplication()
@@ -217,27 +223,46 @@ func main() {
 		AddInputField("ServerUrl", setting.Server, 50, nil, func(text string) { setting.Server = text }).
 		AddInputField("Username", setting.Username, 50, nil, func(text string) { setting.Username = text }).
 		AddPasswordField("Password", setting.Password, 50, '*', func(text string) { setting.Password = text }).
-		AddInputField("RevQueue", setting.RevQueue, 50, nil, func(text string) { setting.RevQueue = text }).
+		AddInputField("RevQueue1", setting.RevQueue1, 50, nil, func(text string) { setting.RevQueue1 = text }).
+		AddInputField("RevQueue2", setting.RevQueue2, 50, nil, func(text string) { setting.RevQueue2 = text }).
 		AddInputField("SedQueue", setting.SedQueue, 50, nil, func(text string) { setting.SedQueue = text }).
 		AddInputField("ThreadCount", setting.ThreadCount, 50, CheckStringIsNumber, func(text string) { setting.ThreadCount = text }).
+		AddInputField("SleepTime", setting.SleepTime, 50, CheckStringIsNumber, func(text string) { setting.SleepTime = text }).
 		AddButton(FireButtonName, func() {
 			if globalFrom == nil {
 				return
 			}
-			ctx, cancel := context.WithCancel(context.Background())
 			if setting.IsRunning {
 				button := globalFrom.GetButton(globalFrom.GetButtonIndex(CeaseButtonName))
 				button.SetLabel(FireButtonName)
 				cancel()
-				wg.Wait()
 				setting.IsRunning = false
 			} else {
 				button := globalFrom.GetButton(globalFrom.GetButtonIndex(FireButtonName))
 				button.SetLabel(CeaseButtonName)
-				atoi, _ := strconv.Atoi(setting.ThreadCount)
-				for i := 0; i < atoi; i++ {
-					wg.Add(1)
-					go handleMsg(ctx, i, setting, statisticdata, &wg)
+
+				// 创建新的 context
+				ctx, cancel = context.WithCancel(context.Background())
+
+				// 计算两个接收队列各自的线程数
+				totalThreads, _ := strconv.Atoi(setting.ThreadCount)
+				var threadCount1, threadCount2 int
+
+				if totalThreads == 1 {
+					threadCount1 = 1
+					threadCount2 = 1
+				} else {
+					threadCount1 = totalThreads / 2
+					threadCount2 = totalThreads - threadCount1
+				}
+
+				// 启动监听队列1
+				for i := 0; i < threadCount1; i++ {
+					go handleMsg(ctx, i, setting, statisticdata, setting.RevQueue1)
+				}
+				// 启动监听队列2
+				for i := 0; i < threadCount2; i++ {
+					go handleMsg(ctx, i+threadCount1, setting, statisticdata, setting.RevQueue2)
 				}
 				go displayStatistics(ctx, statisticdata, statisticsList, app)
 				setting.IsRunning = true
@@ -248,7 +273,7 @@ func main() {
 			if testClient != nil {
 				testClient.Logout()
 			}
-			wg.Wait()
+			cancel()
 			app.Stop()
 		})
 	form.SetBorder(true).SetTitle("Settings").SetTitleAlign(tview.AlignCenter)
@@ -257,7 +282,7 @@ func main() {
 		form.AddButton("Test", func() {
 			if testClient == nil {
 				testClient, _ = NewCFMQClient(setting.Server, "test", setting.Password)
-				testClient.SedQueue = setting.RevQueue
+				testClient.SedQueue = setting.RevQueue1
 				testClient.CreateQueue(testClient.SedQueue)
 			}
 			testClient.SendMsg(TestMsg, "090009000004")

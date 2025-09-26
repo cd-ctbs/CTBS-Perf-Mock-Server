@@ -11,9 +11,11 @@ type Setting struct {
 	Server      string `json:"server"`
 	Username    string `json:"username"`
 	Password    string `json:"password"`
-	RevQueue    string `json:"rev_queue"`
+	RevQueue1   string `json:"rev_queue1"`
+	RevQueue2   string `json:"rev_queue2"`
 	SedQueue    string `json:"sed_queue"`
 	ThreadCount string `json:"thread_count"`
+	SleepTime   string `json:"sleep_time"`
 	IsRunning   bool   `json:"-"`
 }
 

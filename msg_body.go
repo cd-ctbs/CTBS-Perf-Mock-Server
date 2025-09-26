@@ -91,7 +91,7 @@ var TestMsg = `{H:01090009000004  103001        20250717222525ctbs.121.001.01202
         <CreDtTm>2025-07-17T22:25:25</CreDtTm>
         <InstgPty>090009000004</InstgPty>
         <InstdPty>314391075726</InstdPty>
-    </GrpHdr>
+    </GrpHdr>	
     <OrgnlGrpHdr>
         <OrgnlMsgId>202504281814515912</OrgnlMsgId>
         <OrgnlInstgPty>314391075726</OrgnlInstgPty>
